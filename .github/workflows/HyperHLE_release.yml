@@ -9,10 +9,11 @@ on:
         default: false
   push:
     branches: [ "trunk" ]
+    tags:
+      - "v*"
+      - "HyperHLE*"
   pull_request:
     branches: [ "trunk" ]
-  create: # for tags
-
 env:
   CARGO_TERM_COLOR: always
 
@@ -22,20 +23,20 @@ concurrency:
 
 jobs:
   build-osx:
-    runs-on: macos-latest  
+    runs-on: macos-13  
 
     steps:  
       - name: Checkout touchHLE
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
         with:
           submodules: recursive
           
       - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@master
+        uses: Swatinem/rust-cache@v2
 
       - name: Try to get cached copy of Boost  
         id: cache-boost  
-        uses: actions/cache@main
+        uses: actions/cache@v4
         with:  
           path: vendor/boost  
           key: boost_1_81_0_macos  
@@ -104,7 +105,7 @@ jobs:
           done
           mv touchHLE.dmg ..
           
-      - uses: actions/upload-artifact@main
+      - uses: actions/upload-artifact@v4
         with:
           name: touchHLE_macOS_x86_64
           path: touchHLE.dmg
@@ -114,7 +115,7 @@ jobs:
 
     steps:
       - name: Checkout touchHLE
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
         with:
           submodules: recursive
 
@@ -126,9 +127,15 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
             build-essential \
+            cmake \
+            ninja-build \
+            lld \
+            zip \
+            p7zip-full \
             pkg-config \
             libasound2-dev \
             libpulse-dev \
+            libpipewire-0.3-dev \
             libsndio-dev \
             libdbus-1-dev \
             libudev-dev \
@@ -146,11 +153,11 @@ jobs:
             libegl1-mesa-dev
 
       - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@master
+        uses: Swatinem/rust-cache@v2
 
       - name: Try to get cached copy of Boost
         id: cache-boost
-        uses: actions/cache@main
+        uses: actions/cache@v4
         with:
           path: vendor/boost
           key: boost_1_81_0_linux
@@ -174,7 +181,7 @@ jobs:
       - name: Create bundle
         run: cd dev-scripts && ./make-linux-bundle.sh ../target/release/touchHLE && mv touchHLE_linux_bundle/ ..
 
-      - uses: actions/upload-artifact@main
+      - uses: actions/upload-artifact@v4
         with:
           name: touchHLE_Linux_x86_64
           path: touchHLE_linux_bundle/
@@ -184,12 +191,12 @@ jobs:
 
     steps:  
     - name: Checkout touchHLE
-      uses: actions/checkout@main
+      uses: actions/checkout@v4
       with:
         submodules: recursive
 
     - name: Cache Rust build artifacts
-      uses: actions/cache@main
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry
@@ -201,7 +208,7 @@ jobs:
           
     - name: Try to get cached copy of Boost  
       id: cache-boost  
-      uses: actions/cache@main
+      uses: actions/cache@v4
       with:  
         path: vendor/boost  
         key: boost_1_81_0  
@@ -216,7 +223,7 @@ jobs:
 
     - name: Try to get cached copy of cmake  
       id: cache-cmake  
-      uses: actions/cache@main
+      uses: actions/cache@v4
       with:  
         path: vendor/cmake  
         key: cmake_3_31_6_linux  
@@ -237,7 +244,7 @@ jobs:
 
     - name: Try to get a cached copy of Gradle  
       id: cache-gradle  
-      uses: actions/cache@main
+      uses: actions/cache@v4
       with:  
         path: gradle  
         key: gradle-8.11.1  
@@ -252,7 +259,7 @@ jobs:
 
     - name: Try to get a cached copy of Android NDK  
       id: cache-android-ndk  
-      uses: actions/cache@main
+      uses: actions/cache@v4
       with:  
         path: android-ndk  
         key: android-ndk-r25c  
@@ -277,7 +284,7 @@ jobs:
         ANDROID_NDK_ROOT: '/usr/local/lib/android/sdk/ndk/25.2.9519653'  
         CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake  
 
-    - uses: actions/upload-artifact@main
+    - uses: actions/upload-artifact@v4
       with:  
         name: touchHLE_Android_AArch64  
         path: touchHLE.apk
@@ -287,16 +294,16 @@ jobs:
 
     steps:  
     - name: Checkout touchHLE
-      uses: actions/checkout@main
+      uses: actions/checkout@v4
       with:
         submodules: recursive
         
     - name: Cache Rust build artifacts
-      uses: Swatinem/rust-cache@master
+      uses: Swatinem/rust-cache@v2
 
     - name: Try to get cached copy of Boost  
       id: cache-boost  
-      uses: actions/cache@main
+      uses: actions/cache@v4
       with:  
         path: vendor\boost  
         key: boost_1_81_0  
@@ -321,7 +328,7 @@ jobs:
       shell: bash  
       run: cd dev-scripts && ./make-windows-bundle.sh ../target/release/touchHLE.exe && mv touchHLE_windows_bundle/ ..  
       
-    - uses: actions/upload-artifact@main
+    - uses: actions/upload-artifact@v4
       with:  
         name: touchHLE_Windows_x86_64  
         path: touchHLE_windows_bundle/
@@ -329,7 +336,7 @@ jobs:
   check-hyperhle-release:
     runs-on: ubuntu-latest
     if: >-
-      (github.event_name == 'push' && github.ref == 'refs/heads/t') ||
+      ((github.event_name == 'push' && github.ref == 'refs/heads/trunk') || startsWith(github.ref, 'refs/tags/')) ||
       github.event_name == 'workflow_dispatch'
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
@@ -338,7 +345,7 @@ jobs:
       changelog_limit: ${{ steps.check.outputs.changelog_limit }}
     steps:
       - name: Checkout touchHLE
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Check whether a HyperHLE release is due
@@ -361,27 +368,27 @@ jobs:
       contents: write
     steps:
       - name: Checkout touchHLE
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
       - name: Download macOS artifact
-        uses: actions/download-artifact@main
+        uses: actions/download-artifact@v4
         with:
           name: touchHLE_macOS_x86_64
           path: artifacts/macos
       - name: Download Android artifact
-        uses: actions/download-artifact@main
+        uses: actions/download-artifact@v4
         with:
           name: touchHLE_Android_AArch64
           path: artifacts/android
       - name: Download Windows artifact
-        uses: actions/download-artifact@main
+        uses: actions/download-artifact@v4
         with:
           name: touchHLE_Windows_x86_64
           path: artifacts/windows
       - name: Download Linux artifact
-        uses: actions/download-artifact@main
+        uses: actions/download-artifact@v4
         with:
           name: touchHLE_Linux_x86_64
           path: artifacts/linux
@@ -396,7 +403,7 @@ jobs:
           CHANGELOG_LIMIT: ${{ needs.check-hyperhle-release.outputs.changelog_limit }}
         run: ./dev-scripts/package-hyperhle-release.sh "$VERSION" "$CHANGELOG_FROM"
       - name: Publish HyperHLE release
-        uses: softprops/action-gh-release@master
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.check-hyperhle-release.outputs.version }}
           name: HyperHLE ${{ needs.check-hyperhle-release.outputs.version }}

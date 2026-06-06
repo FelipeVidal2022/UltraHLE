@@ -36,3 +36,10 @@ android/build
 # Default developer dump file
 
 DUMP.txt
+
+# Local debug junk
+*.log
+UltraHLE-AppPicker.sh
+touchHLE_apps/
+target/
+*.ipa
