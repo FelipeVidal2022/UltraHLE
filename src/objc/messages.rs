@@ -161,6 +161,25 @@ fn objc_msgSend_inner(
     let _guard = DepthGuard;
     if depth > MAX_DEPTH {
         let sel_name = selector.as_str(&env.mem).to_string();
+
+        if env.bundle.bundle_identifier() == "com.tayasui.mrpoofree"
+            && (sel_name.contains("repaint")
+                || sel_name.contains("draw")
+                || sel_name.contains("displayLink")
+                || sel_name.contains("startAnimation")
+                || sel_name.contains("stopAnimation")
+                || sel_name.contains("startRendering")
+                || sel_name.contains("stopRendering")
+                || sel_name.contains("presentRenderbuffer")
+                || sel_name.contains("applicationDidBecomeActive")
+                || sel_name.contains("setAnimationFrameInterval"))
+        {
+            log!(
+                "[MR GOO MSG TRACE] receiver={:?} selector={}",
+                receiver,
+                sel_name
+            );
+        }
         log!(
             "Warning: objc_msgSend recursion limit ({}) exceeded while dispatching \"{}\" to {:?}; bailing out with a nil return.",
             MAX_DEPTH,
@@ -172,11 +191,9 @@ fn objc_msgSend_inner(
         // fallback path rather than returning nil (which causes cascading
         // failures like "texture cannot be nil!" in games).
         if sel_name == "allocWithZone:" {
-            let obj = env.objc.alloc_object(
-                receiver,
-                Box::new(super::TrivialHostObject),
-                &mut env.mem,
-            );
+            let obj =
+                env.objc
+                    .alloc_object(receiver, Box::new(super::TrivialHostObject), &mut env.mem);
             env.cpu.regs_mut()[0] = obj.to_bits();
             return;
         }
@@ -227,7 +244,9 @@ fn objc_msgSend_inner(
         return;
     }
 
-    if super2.is_none() && try_nsarray_indexed_subscript_interpose(env, receiver, selector, orig_class) {
+    if super2.is_none()
+        && try_nsarray_indexed_subscript_interpose(env, receiver, selector, orig_class)
+    {
         return;
     }
 
@@ -263,7 +282,6 @@ fn objc_msgSend_inner(
         }
     }
 
-    
     // ULTRAHLE_MINIONJUMP_TAP_BRIDGE_BEGIN
     // Minion Jump / SheepEscape: map Cocos2D GrowButton/GrowStarButton objects
     // to their real target+selector callbacks. This is app-gated so Potato and
@@ -410,11 +428,10 @@ fn objc_msgSend_inner(
             || ultrahle_minionjump_sel_name == "currentstage"
             || ultrahle_minionjump_sel_name == "currentStage")
     {
-        let selected_stage_index: u32 =
-            std::env::var("ULTRAHLE_MINIONJUMP_SELECTED_STAGE_INDEX")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
+        let selected_stage_index: u32 = std::env::var("ULTRAHLE_MINIONJUMP_SELECTED_STAGE_INDEX")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
 
         log!(
             "UltraHLE MinionJump: overriding {} -> {}",
@@ -440,6 +457,25 @@ fn objc_msgSend_inner(
                 ..
             } = class_host_object.as_any().downcast_ref().unwrap();
 
+            let missing_selector_name = selector.as_str(&env.mem).to_owned();
+
+            // Cocos2D compatibility:
+            // Potato Story repeatedly asks jkMainLayer for these Cocos2D
+            // cascade flags right before Android falls into the UDF loop.
+            // Treat missing cascade support as false without going through
+            // the generic "does not respond" path.
+            if missing_selector_name == "isCascadeColorEnabled"
+                || missing_selector_name == "isCascadeOpacityEnabled"
+            {
+                log_dbg!(
+                    "Cocos2D compat: {:?} missing selector \"{}\"; returning false",
+                    receiver,
+                    missing_selector_name
+                );
+                env.cpu.regs_mut()[0..2].fill(0);
+                return;
+            }
+
             // --- ИСПРАВЛЕНИЕ ЗДЕСЬ: заменили panic! на log! (мягкий фейл
             // форка) ---
             log!(
@@ -454,7 +490,7 @@ fn objc_msgSend_inner(
                 } else {
                     ""
                 },
-                selector.as_str(&env.mem),
+                missing_selector_name,
             );
 
             // Имитируем возврат nil/0, чтобы приложение продолжило работу
@@ -582,19 +618,17 @@ Type mismatch when sending message {} to {:?}!
                             && !ULTRAHLE_MINIONJUMP_BUTTON_CALLBACK_REENTRY
                                 .swap(true, std::sync::atomic::Ordering::Relaxed)
                         {
-                            let callback_sel_ptr =
-                                crate::mem::ConstPtr::<u8>::from_bits(sel_raw);
+                            let callback_sel_ptr = crate::mem::ConstPtr::<u8>::from_bits(sel_raw);
                             let callback_sel: crate::objc::SEL =
                                 unsafe { std::mem::transmute(callback_sel_ptr) };
                             let callback_name = callback_sel.as_str(&env.mem).to_string();
 
-                            let sender_bits = if mapped_stage != 0
-                                && callback_name == "selectLVAction:"
-                            {
-                                mapped_button
-                            } else {
-                                ultrahle_minionjump_release_arg0
-                            };
+                            let sender_bits =
+                                if mapped_stage != 0 && callback_name == "selectLVAction:" {
+                                    mapped_button
+                                } else {
+                                    ultrahle_minionjump_release_arg0
+                                };
 
                             if mapped_stage != 0 && callback_name == "selectLVAction:" {
                                 let stage_index = mapped_stage.saturating_sub(1);
@@ -616,7 +650,8 @@ Type mismatch when sending message {} to {:?}!
                                 // mapped GrowStarButton. On rebuilt level-select scenes, one can
                                 // have the stale tag while the other is the object selectLVAction
                                 // actually reads.
-                                let release_sender = id::from_bits(ultrahle_minionjump_release_arg0);
+                                let release_sender =
+                                    id::from_bits(ultrahle_minionjump_release_arg0);
                                 let mapped_sender = id::from_bits(mapped_button);
 
                                 let _: () = msg_send_no_type_checking(
@@ -727,8 +762,6 @@ Type mismatch when sending message {} to {:?}!
     }
 }
 
-
-
 // ============================================================================
 
 fn try_nsarray_indexed_subscript_interpose(
@@ -810,10 +843,16 @@ fn gdata_state<R>(f: impl FnOnce(&mut GDataCompatState) -> R) -> R {
 
 fn gdata_class_name(env: &Environment, class: Class) -> Option<String> {
     let host_object = env.objc.get_host_object(class)?;
-    if let Some(co) = host_object.as_any().downcast_ref::<super::ClassHostObject>() {
+    if let Some(co) = host_object
+        .as_any()
+        .downcast_ref::<super::ClassHostObject>()
+    {
         return Some(co.name.clone());
     }
-    if let Some(co) = host_object.as_any().downcast_ref::<super::UnimplementedClass>() {
+    if let Some(co) = host_object
+        .as_any()
+        .downcast_ref::<super::UnimplementedClass>()
+    {
         return Some(co.name.clone());
     }
     if let Some(co) = host_object.as_any().downcast_ref::<super::FakeClass>() {
@@ -823,7 +862,10 @@ fn gdata_class_name(env: &Environment, class: Class) -> Option<String> {
 }
 
 fn gdata_is_class(name: &str) -> bool {
-    matches!(name, "GDataXMLDocument" | "GDataXMLElement" | "GDataXMLNode")
+    matches!(
+        name,
+        "GDataXMLDocument" | "GDataXMLElement" | "GDataXMLNode"
+    )
 }
 
 fn gdata_set_ret_id(env: &mut Environment, value: id) {
@@ -850,7 +892,9 @@ fn gdata_make_array(env: &mut Environment, objects: Vec<id>) -> id {
 
 fn gdata_alloc_object(env: &mut Environment, class_name: &str, object: GDataCompatObject) -> id {
     let class = env.objc.get_known_class(class_name, &mut env.mem);
-    let obj = env.objc.alloc_object(class, Box::new(super::TrivialHostObject), &mut env.mem);
+    let obj = env
+        .objc
+        .alloc_object(class, Box::new(super::TrivialHostObject), &mut env.mem);
     gdata_state(|s| {
         s.objects.insert(obj.to_bits(), object);
     });
@@ -868,12 +912,19 @@ fn gdata_lookup_object(obj: id) -> Option<GDataCompatObject> {
 }
 
 fn gdata_node_name(node: usize) -> String {
-    gdata_state(|s| s.nodes.get(node).map(|n| n.name.clone()).unwrap_or_default())
+    gdata_state(|s| {
+        s.nodes
+            .get(node)
+            .map(|n| n.name.clone())
+            .unwrap_or_default()
+    })
 }
 
 fn gdata_node_string_value(node: usize) -> String {
     fn collect(nodes: &[GDataCompatNode], idx: usize, out: &mut String) {
-        let Some(n) = nodes.get(idx) else { return; };
+        let Some(n) = nodes.get(idx) else {
+            return;
+        };
         if !n.text.is_empty() {
             out.push_str(&n.text);
         }
@@ -1008,8 +1059,12 @@ fn gdata_parse_xml(xml: &str) -> Option<usize> {
 }
 
 fn gdata_data_to_string(env: &mut Environment, data: id) -> String {
-    let Some(sel_bytes) = env.objc.lookup_selector("bytes") else { return String::new(); };
-    let Some(sel_length) = env.objc.lookup_selector("length") else { return String::new(); };
+    let Some(sel_bytes) = env.objc.lookup_selector("bytes") else {
+        return String::new();
+    };
+    let Some(sel_length) = env.objc.lookup_selector("length") else {
+        return String::new();
+    };
     let bytes: ConstPtr<u8> = msg_send_no_type_checking(env, (data, sel_bytes));
     let length: u32 = msg_send_no_type_checking(env, (data, sel_length));
     if bytes.is_null() || length == 0 {
@@ -1018,13 +1073,33 @@ fn gdata_data_to_string(env: &mut Environment, data: id) -> String {
     String::from_utf8_lossy(env.mem.bytes_at(bytes, length)).into_owned()
 }
 
-fn gdata_children_array(env: &mut Environment, node: usize, name_filter: Option<String>, deep: bool) -> id {
-    fn visit(env: &mut Environment, node_idx: usize, filter: Option<&str>, deep: bool, out: &mut Vec<id>) {
-        let children = gdata_state(|s| s.nodes.get(node_idx).map(|n| n.children.clone()).unwrap_or_default());
+fn gdata_children_array(
+    env: &mut Environment,
+    node: usize,
+    name_filter: Option<String>,
+    deep: bool,
+) -> id {
+    fn visit(
+        env: &mut Environment,
+        node_idx: usize,
+        filter: Option<&str>,
+        deep: bool,
+        out: &mut Vec<id>,
+    ) {
+        let children = gdata_state(|s| {
+            s.nodes
+                .get(node_idx)
+                .map(|n| n.children.clone())
+                .unwrap_or_default()
+        });
         for child in children {
             let name = gdata_node_name(child);
             if filter.map(|f| f == name).unwrap_or(true) {
-                out.push(gdata_alloc_object(env, "GDataXMLElement", GDataCompatObject::Element { node: child }));
+                out.push(gdata_alloc_object(
+                    env,
+                    "GDataXMLElement",
+                    GDataCompatObject::Element { node: child },
+                ));
             }
             if deep {
                 visit(env, child, filter, deep, out);
@@ -1038,22 +1113,35 @@ fn gdata_children_array(env: &mut Environment, node: usize, name_filter: Option<
 }
 
 fn gdata_attrs_array(env: &mut Environment, node: usize) -> id {
-    let attrs = gdata_state(|s| s.nodes.get(node).map(|n| n.attrs.clone()).unwrap_or_default());
+    let attrs = gdata_state(|s| {
+        s.nodes
+            .get(node)
+            .map(|n| n.attrs.clone())
+            .unwrap_or_default()
+    });
     let mut out = Vec::new();
     for (name, value) in attrs {
-        out.push(gdata_alloc_object(env, "GDataXMLNode", GDataCompatObject::Attribute { name, value }));
+        out.push(gdata_alloc_object(
+            env,
+            "GDataXMLNode",
+            GDataCompatObject::Attribute { name, value },
+        ));
     }
     gdata_make_array(env, out)
 }
 
 fn gdata_attribute_for_name(env: &mut Environment, node: usize, wanted: String) -> id {
     let found = gdata_state(|s| {
-        s.nodes.get(node).and_then(|n| {
-            n.attrs.iter().find(|(k, _)| k == &wanted).cloned()
-        })
+        s.nodes
+            .get(node)
+            .and_then(|n| n.attrs.iter().find(|(k, _)| k == &wanted).cloned())
     });
     if let Some((name, value)) = found {
-        gdata_alloc_object(env, "GDataXMLNode", GDataCompatObject::Attribute { name, value })
+        gdata_alloc_object(
+            env,
+            "GDataXMLNode",
+            GDataCompatObject::Attribute { name, value },
+        )
     } else {
         nil
     }
@@ -1063,14 +1151,25 @@ fn gdata_parse_libxml_node_handle(env: &mut Environment, node_handle: u32) -> Op
     let xml = crate::frameworks::libxml2::compat_node_handle_to_xml_string(env, node_handle)?;
     let root = gdata_parse_xml(&xml);
     if root.is_none() {
-        log!("GDataXML compat: failed to parse XML dumped from libxml node handle {:#x}", node_handle);
+        log!(
+            "GDataXML compat: failed to parse XML dumped from libxml node handle {:#x}",
+            node_handle
+        );
     } else {
-        log!("GDataXML compat: parsed XML dumped from libxml node handle {:#x}", node_handle);
+        log!(
+            "GDataXML compat: parsed XML dumped from libxml node handle {:#x}",
+            node_handle
+        );
     }
     root
 }
 
-fn try_gdataxml_interpose(env: &mut Environment, receiver: id, selector: SEL, orig_class: Class) -> bool {
+fn try_gdataxml_interpose(
+    env: &mut Environment,
+    receiver: id,
+    selector: SEL,
+    orig_class: Class,
+) -> bool {
     let sel = selector.as_str(&env.mem).to_string();
     let Some(class_name) = gdata_class_name(env, orig_class) else {
         return false;
@@ -1092,7 +1191,10 @@ fn try_gdataxml_interpose(env: &mut Environment, receiver: id, selector: SEL, or
             let xml = gdata_to_string(env, xml_obj);
             if let Some(root) = gdata_parse_xml(&xml) {
                 gdata_store_object(receiver, GDataCompatObject::Document { root });
-                log!("GDataXML compat: parsed XML string for document {:?}", receiver);
+                log!(
+                    "GDataXML compat: parsed XML string for document {:?}",
+                    receiver
+                );
                 gdata_set_ret_id(env, receiver);
             } else {
                 log!("GDataXML compat: failed to parse XML string");
@@ -1107,7 +1209,10 @@ fn try_gdataxml_interpose(env: &mut Environment, receiver: id, selector: SEL, or
             let xml = gdata_data_to_string(env, data_obj);
             if let Some(root) = gdata_parse_xml(&xml) {
                 gdata_store_object(receiver, GDataCompatObject::Document { root });
-                log!("GDataXML compat: parsed XML data for document {:?}", receiver);
+                log!(
+                    "GDataXML compat: parsed XML data for document {:?}",
+                    receiver
+                );
                 gdata_set_ret_id(env, receiver);
             } else {
                 log!("GDataXML compat: failed to parse XML data");
@@ -1129,7 +1234,11 @@ fn try_gdataxml_interpose(env: &mut Environment, receiver: id, selector: SEL, or
 
         ("GDataXMLDocument", "rootElement") => {
             if let Some(GDataCompatObject::Document { root }) = gdata_lookup_object(receiver) {
-                let obj = gdata_alloc_object(env, "GDataXMLElement", GDataCompatObject::Element { node: root });
+                let obj = gdata_alloc_object(
+                    env,
+                    "GDataXMLElement",
+                    GDataCompatObject::Element { node: root },
+                );
                 gdata_set_ret_id(env, obj);
             } else {
                 gdata_set_ret_id(env, nil);
@@ -1140,7 +1249,11 @@ fn try_gdataxml_interpose(env: &mut Environment, receiver: id, selector: SEL, or
         (_, "nodeConsumingXMLNode:") | (_, "nodeBorrowingXMLNode:") => {
             let node_handle = arg2;
             if let Some(root) = gdata_parse_libxml_node_handle(env, node_handle) {
-                let obj = gdata_alloc_object(env, "GDataXMLElement", GDataCompatObject::Element { node: root });
+                let obj = gdata_alloc_object(
+                    env,
+                    "GDataXMLElement",
+                    GDataCompatObject::Element { node: root },
+                );
                 gdata_set_ret_id(env, obj);
             } else {
                 gdata_set_ret_id(env, nil);
@@ -1173,7 +1286,8 @@ fn try_gdataxml_interpose(env: &mut Environment, receiver: id, selector: SEL, or
                 });
                 idx
             });
-            let obj = gdata_alloc_object(env, "GDataXMLElement", GDataCompatObject::Element { node });
+            let obj =
+                gdata_alloc_object(env, "GDataXMLElement", GDataCompatObject::Element { node });
             gdata_set_ret_id(env, obj);
             return true;
         }
@@ -1268,7 +1382,9 @@ fn try_gdataxml_interpose(env: &mut Environment, receiver: id, selector: SEL, or
         (_, "nodesForXPath:error:") | (_, "nodesForXPath:namespaces:error:") => {
             let xpath_obj: id = Ptr::from_bits(arg2);
             let xpath = gdata_to_string(env, xpath_obj);
-            let result = if let Some(GDataCompatObject::Element { node }) = gdata_lookup_object(receiver) {
+            let result = if let Some(GDataCompatObject::Element { node }) =
+                gdata_lookup_object(receiver)
+            {
                 if let Some(name) = xpath.strip_prefix("//") {
                     gdata_children_array(env, node, Some(name.to_string()), true)
                 } else if let Some(name) = xpath.strip_prefix("./") {
@@ -1276,7 +1392,8 @@ fn try_gdataxml_interpose(env: &mut Environment, receiver: id, selector: SEL, or
                 } else {
                     gdata_make_array(env, Vec::new())
                 }
-            } else if let Some(GDataCompatObject::Document { root }) = gdata_lookup_object(receiver) {
+            } else if let Some(GDataCompatObject::Document { root }) = gdata_lookup_object(receiver)
+            {
                 if let Some(name) = xpath.strip_prefix("//") {
                     gdata_children_array(env, root, Some(name.to_string()), true)
                 } else {
@@ -1288,7 +1405,6 @@ fn try_gdataxml_interpose(env: &mut Environment, receiver: id, selector: SEL, or
             gdata_set_ret_id(env, result);
             return true;
         }
-
 
         (_, "dealloc") => {
             gdata_state(|s| {
