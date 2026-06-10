@@ -45,6 +45,41 @@ struct NSUserDefaultsHostObject {
 }
 impl HostObject for NSUserDefaultsHostObject {}
 
+
+fn ultrahle_minionjump_force_unlock_key(env: &mut Environment, key: id) -> bool {
+    if !matches!(
+        env.bundle.bundle_identifier(),
+        "com.apprisetec9.minionjump" | "com.risinghighapps.kingdomprincepro"
+    ) {
+        return false;
+    }
+
+    if key == nil {
+        return false;
+    }
+
+    let key_str = to_rust_string(env, key).into_owned();
+
+    // Minion Jump uses:
+    // stage_u_%d = unlocked flag
+    // stage_s_%d = stars/progress
+    //
+    // Forcing only the GrowStarButton locked argument makes the tiles LOOK
+    // unlocked, but selectLVAction still checks saved progress internally.
+    for prefix in ["stage_u_", "stage_s_"] {
+        if let Some(rest) = key_str.strip_prefix(prefix) {
+            if let Ok(n) = rest.parse::<u32>() {
+                if n <= 25 {
+                    log!("UltraHLE MinionJump: forcing NSUserDefaults {} = 1", key_str);
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -144,6 +179,16 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())setValue:(id)val forKey:(id)key { // NSString*
+    // ULTRAHLE_MINIONJUMP_SETVALUE_BEGIN
+    if ultrahle_minionjump_force_unlock_key(env, key) {
+        let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
+        let one_i: NSInteger = 1;
+        let one: id = msg_class![env; NSNumber numberWithInteger:one_i];
+        () = msg![env; dict setValue:one forKey:key];
+        return;
+    }
+    // ULTRAHLE_MINIONJUMP_SETVALUE_END
+
     let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
     () = msg![env; dict setValue:val forKey:key];
 }
@@ -310,6 +355,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)objectForKey:(id)key { // NSString*
+    // ULTRAHLE_MINIONJUMP_OBJECTFORKEY_BEGIN
+    if ultrahle_minionjump_force_unlock_key(env, key) {
+        let one_i: NSInteger = 1;
+        let one: id = msg_class![env; NSNumber numberWithInteger:one_i];
+        return one;
+    }
+    // ULTRAHLE_MINIONJUMP_OBJECTFORKEY_END
+
     let app_domain_dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
     let res: id = msg![env; app_domain_dict objectForKey:key];
     if res != nil {
@@ -337,6 +390,16 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())setObject:(id)object forKey:(id)key { // NSString*
+    // ULTRAHLE_MINIONJUMP_SETOBJECT_BEGIN
+    if ultrahle_minionjump_force_unlock_key(env, key) {
+        let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
+        let one_i: NSInteger = 1;
+        let one: id = msg_class![env; NSNumber numberWithInteger:one_i];
+        () = msg![env; dict setObject:one forKey:key];
+        return;
+    }
+    // ULTRAHLE_MINIONJUMP_SETOBJECT_END
+
     let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
     () = msg![env; dict setObject:object forKey:key];
 }
