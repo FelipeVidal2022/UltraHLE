@@ -287,9 +287,9 @@ fn show_app_picker_gui(
     let icon = {
         let bytes: &[u8] = match crate::branding() {
             "" => include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/res/icon.png")),
-            "UNOFFICIAL" => include_bytes!(concat!(
+            "FELIPEVIDAL2022" => include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/res/icon_unofficial.png"
+                "/res/icon_felipevidal2022.png"
             )),
             "PREVIEW" => {
                 include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/res/icon_preview.png"))
@@ -408,7 +408,7 @@ fn app_picker_inner(
         let text = ns_string::from_rust_string(
             env,
             format!(
-                "touchHLE {}{}{}",
+                "UltrahHLE {}{}{}",
                 crate::branding(),
                 if crate::branding().is_empty() {
                     ""
@@ -434,8 +434,8 @@ fn app_picker_inner(
         () = msg![env; main_view addSubview:label];
     }
 
-    let brand_color: id = if crate::branding() == "UNOFFICIAL" {
-        msg_class![env; UIColor redColor]
+    let brand_color: id = if crate::branding() == "FELIPEVIDAL2022" {
+        msg_class![env; UIColor blueColor]
     } else {
         msg_class![env; UIColor grayColor]
     };
